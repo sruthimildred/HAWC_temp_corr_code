@@ -1,0 +1,72 @@
+import os
+import requests
+
+# ----------------------------------------------------------
+# OUTPUT DIRECTORY
+# ----------------------------------------------------------
+output_dir = "/home/hp/phd/omni_data"
+os.makedirs(output_dir, exist_ok=True)
+
+# ----------------------------------------------------------
+# OMNIWEB URL
+# ----------------------------------------------------------
+url = "https://omniweb.gsfc.nasa.gov/cgi/nx1.cgi"
+
+# ----------------------------------------------------------
+# CORRECT VARIABLE INDICES FROM OMNI PARAMETER LIST
+# ----------------------------------------------------------
+variables = [
+    9,   # Scalar B, nT (|B|)
+    12,  # BX, nT (GSE)
+    13,  # BY, nT (GSE)
+    14,  # BZ, nT (GSE)
+    23,  # density
+    22,  # temperature 
+    24,  # speed
+    40   # Dst-index, nT
+]
+
+# ----------------------------------------------------------
+# DOWNLOAD LOOP (1996 to 2026)
+# ----------------------------------------------------------
+for year in range(1996, 2026):
+
+    print(f"Downloading {year}...")
+
+    # Base request parameters (res set to 'min' for 1-minute data)
+    data = [
+        ("activity", "retrieve"),
+        ("res", "min"),
+        ("spacecraft", "omni2"),
+        ("start_date", f"{year}0101"),
+        ("end_date", f"{year}1231"),
+    ]
+
+    # Add variables
+    for var in variables:
+        data.append(("vars", str(var)))
+
+    # Request ASCII table output
+    data.extend([
+        ("table", "1"),
+        ("scale", "Linear"),
+        ("view", "0"),
+        ("imagex", "640"),
+        ("imagey", "480"),
+    ])
+
+    try:
+        response = requests.post(url, data=data, timeout=300)
+        response.raise_for_status()
+
+        outfile = os.path.join(output_dir, f"omni_{year}.txt")
+
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write(response.text)
+
+        print(f"Saved: {outfile}")
+
+    except Exception as e:
+        print(f"Failed for {year}: {e}")
+
+print("All downloads completed.")
