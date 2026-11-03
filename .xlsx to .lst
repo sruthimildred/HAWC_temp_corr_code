@@ -1,0 +1,31 @@
+import pandas as pd
+
+excel_path = "/home/hp/phd/Teff/650data.xlsx"
+output_path = "/home/hp/phd/Teff/650data.lst"
+
+df = pd.read_excel(
+    excel_path,
+    usecols="A:V",
+    skiprows=1,
+    header=None,
+    parse_dates=[0]
+)
+
+# Extract datetime components
+dates = df.iloc[:, 0]
+
+years   = dates.dt.year
+months  = dates.dt.month.map("{:02d}".format)
+days    = dates.dt.day.map("{:02d}".format)
+hours   = dates.dt.hour.map("{:02d}".format)
+mins    = dates.dt.minute.map("{:02d}".format)
+secs    = dates.dt.second.map("{:02d}".format)
+
+values = df.iloc[:, 1]
+
+# Write to LST file
+with open(output_path, "w") as f:
+    for y, m, d, h, mi, s, val in zip(years, months, days, hours, mins, secs, values):
+        f.write(f"{y} {m} {d} {h} {mi} {s} {val}\n")
+
+print("LST file created:", output_path)
