@@ -1,0 +1,90 @@
+import glob
+import netCDF4 as nc
+import numpy as np
+import pandas as pd
+import traceback
+
+files = sorted(glob.glob("/home/hp/phd/Teff/data/*.nc"))
+print("Found", len(files), "files")
+
+frames = []
+skipped = []
+
+for f in files:
+    print("Processing:", f)
+    try:
+        ds = nc.Dataset(f, "r")
+    except Exception as e:
+        print("  OPEN FAILED:", type(e).__name__, str(e)[:200])
+        skipped.append((f, "open_failed", e))
+        continue
+
+    # required vars
+    required = ("T", "lat", "lon", "time", "lev")
+    miss = [v for v in required if v not in ds.variables]
+    if miss:
+        print("  SKIP: missing variables:", miss)
+        skipped.append((f, "missing_vars", miss))
+        try: ds.close()
+        except: pass
+        continue
+
+    try:
+        T = ds.variables["T"][:]               # shape (time, lev, lat, lon)
+        lev = ds.variables["lev"][:]
+        time_var = ds.variables["time"]
+        # convert times -> datetime objects (uses per-file units/calendar)
+        try:
+            times = nc.num2date(time_var[:], units=time_var.units, calendar=getattr(time_var, "calendar", "standard"))
+        except Exception as e_time:
+            print("  WARNING: num2date failed:", e_time, " -> using raw numeric times")
+            times = time_var[:]
+
+        # mean over lat & lon (axes -2 and -1 -> axis 2 and 3 for shape above)
+        # handle masked arrays
+        if hasattr(T, "mask"):
+            mean_t = np.ma.mean(np.ma.mean(T, axis=3), axis=2).filled(np.nan)  # result shape (time, lev)
+        else:
+            mean_t = np.mean(np.mean(T, axis=3), axis=2)
+
+        mean_t = np.asarray(mean_t)  # ensure numpy array
+        # if lev is 1D as expected, create column names per lev value
+        col_names = [f"lev_{float(x):g}" for x in np.atleast_1d(lev)]
+
+        # if mean_t has shape (time, lev)
+        if mean_t.ndim == 2:
+            df = pd.DataFrame(mean_t, index=pd.Index(times, name="time"), columns=col_names)
+        elif mean_t.ndim == 1:
+            # maybe lev collapsed; make single column
+            df = pd.DataFrame(mean_t, index=pd.Index(times, name="time"), columns=["T_mean"])
+        else:
+            raise ValueError("unexpected mean_t ndim: " + str(mean_t.ndim))
+
+        frames.append(df)
+        print("  OK: appended shape", df.shape)
+    except Exception as e:
+        print("  ERROR during processing:", type(e).__name__, str(e)[:200])
+        traceback.print_exc()
+        skipped.append((f, "process_failed", e))
+    finally:
+        try: ds.close()
+        except: pass
+
+if frames:
+    big = pd.concat(frames)
+    # convert index to datetime if possible and sort
+    try:
+        big.index = pd.to_datetime(big.index)
+    except Exception:
+        pass
+    big = big[~big.index.duplicated(keep="first")]
+    big = big.sort_index()
+    out = "/home/hp/phd/Teff/650data.xlsx"
+    big.to_excel(out, sheet_name="Temperature Data")
+    print("Saved Excel:", out, "shape:", big.shape)
+else:
+    print("No data frames produced; nothing saved.")
+
+print("Skipped files:", len(skipped))
+for s in skipped[:20]:
+    print(s[0], "->", s[1])
